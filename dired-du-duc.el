@@ -14,6 +14,12 @@
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+;; Author:   Martin Edström <meedstrom91@gmail.com>
+;; URL:      https://github.com/meedstrom/dired-du-duc
+;; Created:  2025-12-03
+;; Keywords: files
+;; Package-Requires: ((emacs "29.1") (dired-du "0.5.2"))
+
 ;;; Commentary:
 
 ;; Add indexing to Dired-Du, via the Linux utility \"duc\".
@@ -42,6 +48,10 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+(require 'dired)
+(require 'dired-du)
+
 (defgroup dired-du-duc ()
   "Add indexing to Dired-Du, via the Linux utility \"duc\".
 
@@ -51,7 +61,6 @@ Get duc:
   https://github.com/zevv/duc"
   :group 'dired-du)
 
-(defvar dired-du-duc--timer (timer-create))
 (defcustom dired-du-duc-interval 3600
   "Seconds between each reindex of `dired-du-duc-roots'."
   :type 'number)
@@ -79,13 +88,19 @@ Get duc:
                   (dired-revert)))
     (assq-delete-all proc dired-du-duc--process-dirs)))
 
+(defun dired-du-duc-local-p ()
+  "Non-nil if current directory is on a local filesystem."
+  (not (file-remote-p default-directory)))
+
 (defun dired-du-duc-indexed-p ()
   "Non-nil if current directory has been indexed."
   (eq 0 (call-process "duc" nil nil nil "ls")))
 
-(defun dired-du-duc-not-remote-p ()
-  "Non-nil if current directory is on a local filesystem."
-  (not (file-remote-p default-directory)))
+(defcustom dired-du-duc-directory-predicate #'dired-du-duc-local-p
+  "Predicate for whether a directory should be indexed."
+  :type '(radio (function-item dired-du-duc-local-p)
+                (function-item :tag "Always index any directory" always)
+                (function :tag "Custom predicate" :value (lambda ()))))
 
 (defcustom dired-du-duc-du-mode-predicate #'dired-du-duc-indexed-p
   "Predicate for whether a Dired buffer should enable `dired-du-mode'."
@@ -93,15 +108,10 @@ Get duc:
                 (function-item :tag "Always enable dired-du-mode" always)
                 (function :tag "Custom predicate" :value (lambda ()))))
 
-(defcustom dired-du-duc-directory-predicate #'dired-du-duc-not-remote-p
-  "Predicate for whether a directory should be indexed."
-  :type '(radio (function-item dired-du-duc-not-remote-p)
-                (function-item :tag "Always index any directory" always)
-                (function :tag "Custom predicate" :value (lambda ()))))
-
 ;;;###autoload
 (define-minor-mode dired-du-duc-mode
   "Du duktig!"
+  :lighter "duc"
   (cond ((and (derived-mode-p 'dired-mode) dired-du-duc-mode)
          (dired-du-mode 0)
          (kill-local-variable 'dired-du-used-space-program)
@@ -116,13 +126,15 @@ Get duc:
            (remove-hook 'dired-mode-hook #'dired-du-mode))
          ;; Make it so that when this Dired buffer refreshes for any reason,
          ;; it'll also re-run the above checks, so it can potentially turn on
-         ;; `dired-du-mode' even if it didn't before.
+         ;; `dired-du-mode' if it didn't do so before.
          (add-hook 'dired-after-readin-hook #'dired-du-duc-mode nil t))
 
         ((derived-mode-p 'dired-mode)
          (kill-local-variable 'dired-du-used-space-program)
          (dired-du-mode 0)
-         (remove-hook 'dired-mode-hook #'dired-du-duc-mode t))))
+         (remove-hook 'dired-after-readin-hook #'dired-du-duc-mode t))))
+
+(defvar dired-du-duc--timer (timer-create))
 
 (defun dired-du-duc--turn-on ()
   (when (derived-mode-p 'dired-mode)
@@ -134,8 +146,11 @@ Get duc:
   dired-du-duc--turn-on
   (cancel-timer dired-du-duc--timer)
   (when global-dired-du-duc-mode
-    (setq dired-du-duc--timer
-          (run-with-timer 0 dired-du-duc-interval #'dired-du-duc-index))))
+    (if (executable-find "duc")
+        (setq dired-du-duc--timer
+              (run-with-timer 0 dired-du-duc-interval #'dired-du-duc-index))
+      (display-warning 'dired-du-duc "No executable \"duc\" in PATH")
+      (global-dired-du-duc-mode 0))))
 
 (provide 'dired-du-duc)
 
