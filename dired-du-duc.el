@@ -66,6 +66,41 @@
   "Directories that `global-dired-du-duc-mode' should regularly index."
   :type '(repeat directory))
 
+(defcustom dired-du-duc-index-functions nil
+  "Hook run with one argument, the list of directories to index.
+Called by `dired-du-duc-index' before the indexing has finished."
+  :type 'hook)
+
+(defcustom dired-du-duc-after-re-index-hook '(dired-revert)
+  "Hook run in a Dired buffer just after duc finished indexing its dir.
+As there may not be buffers for every directory, this hook likely sees
+fewer directories than `dired-du-duc-index-functions' does."
+  :type 'hook)
+
+(defcustom dired-du-duc-index-predicate 'dired-du-duc-local-p
+  "Predicate for whether a directory should be indexed with duc."
+  :type '(radio (function-item dired-du-duc-local-p)
+                (function-item always)
+                (function :tag "Custom predicate" :value (lambda ()))))
+
+(defcustom dired-du-duc-mode-predicate 'dired-du-duc-indexed-p
+  "Predicate for whether a Dired buffer should display recursive sizes.
+The sizes are taken from duc if possible, or calculated anew with du."
+  :type '(radio (function-item dired-du-duc-indexed-p)
+                (function-item always)
+                (function :tag "Custom predicate" :value (lambda ()))))
+
+(defun dired-du-duc-local-p ()
+  "Non-nil if current directory is on a local filesystem."
+  (not (file-remote-p default-directory)))
+
+(defun dired-du-duc-indexed-p ()
+  "Non-nil if current directory has been indexed."
+  (with-temp-buffer
+    (if (eq 0 (call-process "duc" nil t nil "ls"))
+        t
+      (display-warning 'dired-du-duc (buffer-string)))))
+
 (defvar dired-du-duc--process-dirs nil)
 (defun dired-du-duc-index (dirs)
   "Run \"duc index\" on DIRS."
@@ -77,17 +112,7 @@
                        "duc" "index" "-v" dirs)))
       (push (cons proc dirs) dired-du-duc--process-dirs)
       (set-process-sentinel proc #'dired-du-duc--handle-done))
-    (dolist (dir dirs)
-      (let ((default-directory dir))
-        (run-hooks 'dired-du-duc-index-hook)))))
-
-(defvar dired-du-duc-index-hook nil
-  "Hook run for every directory passed to `dired-du-duc-index'.
-The directory is used as `default-directory'.
-This can be used to run other programs such as `updatedb'.")
-
-(defvar dired-du-duc-after-re-index-hook '(dired-revert)
-  "Hook run in a Dired buffer just after duc finished indexing its dir.")
+    (run-hook-with-args 'dired-du-duc-index-functions dirs)))
 
 (defun dired-du-duc--handle-done (proc _event)
   "If PROC done, revert any buffers that show the newly indexed dirs.
@@ -106,30 +131,6 @@ which presumably includes the function `dired-revert'."
     (when (buffer-live-p (get-buffer " *duc*"))
       (display-buffer " *duc*"))
     (message "Unexpected sentinel invocation for process %S" proc)))
-
-(defun dired-du-duc-local-p ()
-  "Non-nil if current directory is on a local filesystem."
-  (not (file-remote-p default-directory)))
-
-(defun dired-du-duc-indexed-p ()
-  "Non-nil if current directory has been indexed."
-  (with-temp-buffer
-    (if (eq 0 (call-process "duc" nil t nil "ls"))
-        t
-      (display-warning 'dired-du-duc (buffer-string)))))
-
-(defcustom dired-du-duc-index-predicate #'dired-du-duc-local-p
-  "Predicate for whether a directory should be indexed with duc."
-  :type '(radio (function-item dired-du-duc-local-p)
-                (function-item always)
-                (function :tag "Custom predicate" :value (lambda ()))))
-
-(defcustom dired-du-duc-mode-predicate #'dired-du-duc-indexed-p
-  "Predicate for whether a Dired buffer should display recursive sizes.
-The sizes are taken from duc if possible, or calculated anew with du."
-  :type '(radio (function-item dired-du-duc-indexed-p)
-                (function-item always)
-                (function :tag "Custom predicate" :value (lambda ()))))
 
 (defvar-local dired-du-duc--lighter " Dired-Du")
 (define-minor-mode dired-du-duc-mode
