@@ -22,9 +22,7 @@
 
 ;;; Commentary:
 
-;; Add indexing to Dired-Du, via the Linux utility "duc".
-
-;; Get duc:
+;; This adapts Dired-Du to use "duc".  Get duc:
 
 ;;   https://duc.zevv.nl/
 ;;   https://github.com/zevv/duc
@@ -37,12 +35,13 @@
 
 ;; The global mode does three things:
 
-;; 1. Start regularly indexing `dired-du-duc-directories'.
+;; 1. Regularly run "duc index" on `dired-du-duc-directories'.
 
 ;; 2. Index every directory that the user actually visits in Dired,
-;;    and when that is done, revert the buffer so it shows correct sizes.
+;;    asynchronously, and when that is done, revert the buffer so it shows
+;;    correct sizes.
 
-;; 3. Manage turning `dired-du-mode' on in relevant buffers when duc is ready.
+;; 3. Turn `dired-du-duc-mode' on in relevant buffers when duc is ready.
 ;;    Option `dired-du-duc-mode-predicate' can be configured to enable it
 ;;    always if you are fine with the slow "du" as a fallback.
 
@@ -53,39 +52,30 @@
 (require 'dired-du)
 
 (defgroup dired-du-duc ()
-  "Pre-cache size info for Dired-Du, via the Linux utility \"duc\"."
+  "Faster Dired-Du, via the Linux utility \"duc\"."
   :group 'dired-du
   :link '(url-link "https://github.com/zevv/duc")
   :link '(url-link "https://duc.zevv.nl/"))
 
 (defcustom dired-du-duc-delay 3600
-  "Seconds between each reindex of `dired-du-duc-directories'."
+  "Seconds between each indexing of `dired-du-duc-directories'."
   :type 'number)
 
-(defcustom dired-du-duc-directories '("/home" "/media" "/run/media" "/mnt" "/opt")
+(defcustom dired-du-duc-directories '("/home")
   "Directories that `global-dired-du-duc-mode' should regularly index."
   :type '(repeat directory))
-
-(defcustom dired-du-duc-index-functions nil
-  "Hook run with one argument, the list of directories to index.
-Called by `dired-du-duc-index' before the indexing has finished."
-  :type 'hook)
-
-(defcustom dired-du-duc-after-re-index-hook '(dired-revert)
-  "Hook run in a Dired buffer just after duc finished indexing its dir.
-As there may not be buffers for every directory, this hook likely sees
-fewer directories than `dired-du-duc-index-functions' does."
-  :type 'hook)
 
 (defcustom dired-du-duc-index-predicate 'dired-du-duc-local-p
   "Predicate for whether a directory should be indexed with duc."
   :type '(radio (function-item dired-du-duc-local-p)
                 (function-item always)
+                (function-item ignore)
                 (function :tag "Custom predicate" :value (lambda ()))))
 
 (defcustom dired-du-duc-mode-predicate 'dired-du-duc-indexed-p
   "Predicate for whether a Dired buffer should display recursive sizes.
-The sizes are taken from duc if possible, or calculated anew with du."
+The sizes are taken from duc if possible, or calculated anew with du.
+Used by `global-dired-du-duc-mode'."
   :type '(radio (function-item dired-du-duc-indexed-p)
                 (function-item always)
                 (function :tag "Custom predicate" :value (lambda ()))))
@@ -96,10 +86,16 @@ The sizes are taken from duc if possible, or calculated anew with du."
 
 (defun dired-du-duc-indexed-p ()
   "Non-nil if current directory has been indexed."
-  (with-temp-buffer
-    (if (eq 0 (call-process "duc" nil t nil "ls"))
-        t
-      (display-warning 'dired-du-duc (buffer-string)))))
+  (eq 0 (call-process "duc" nil nil nil "ls")))
+
+(defvar dired-du-duc-before-index-functions nil
+  "Hook run with one argument, the list of directories to index.
+Called by `dired-du-duc-index' just after starting an async job.")
+
+(defvar dired-du-duc-after-re-index-hook '(dired-revert)
+  "Hook run in a Dired buffer after duc finished indexing the directory.
+As there may not be buffers for every directory indexed, this hook sees
+fewer directories than `dired-du-duc-before-index-functions' does.")
 
 (defvar dired-du-duc--process-dirs nil)
 (defun dired-du-duc-index (dirs)
@@ -112,7 +108,7 @@ The sizes are taken from duc if possible, or calculated anew with du."
                        "duc" "index" "-v" dirs)))
       (push (cons proc dirs) dired-du-duc--process-dirs)
       (set-process-sentinel proc #'dired-du-duc--handle-done))
-    (run-hook-with-args 'dired-du-duc-index-functions dirs)))
+    (run-hook-with-args 'dired-du-duc-before-index-functions dirs)))
 
 (defun dired-du-duc--handle-done (proc _event)
   "If PROC done, revert any buffers that show the newly indexed dirs.
@@ -132,9 +128,9 @@ which presumably includes the function `dired-revert'."
       (display-buffer " *duc*"))
     (message "Unexpected sentinel invocation for process %S" proc)))
 
-(defvar-local dired-du-duc--lighter " Dired-Du")
+(defvar-local dired-du-duc--lighter " du")
 (define-minor-mode dired-du-duc-mode
-  "Use du or duc to augment file size information.
+  "Show real directory sizes in Dired, using du or duc.
 
 You should not enable both `dired-du-mode' and `dired-du-duc-mode'.
 They are the same, and both obey most user configurations for Dired-Du.
@@ -159,22 +155,28 @@ See also `dired-du-on-find-dired-ok'.
        'dired-du-duc "No ls-lisp support without `global-dired-du-duc-mode'"))
     (when dired-du-mode
       (dired-du-mode 0))
-    (if (dired-du-duc-indexed-p)
+    (if (and (executable-find "duc")
+             ;; Ensure ~/.cache/duc/duc.db
+             (call-process "duc" nil nil nil "index" (null-device))
+             (dired-du-duc-indexed-p))
         (setq-local dired-du-used-space-program '("duc" "ls -bD")
-                    dired-du-duc--lighter " Dired-Du-Duc")
+                    dired-du-duc--lighter " duc")
       (kill-local-variable 'dired-du-used-space-program)
       (kill-local-variable 'dired-du-duc--lighter)
-      (lwarn 'dired-du-duc :debug "Using du without duc in %S" (current-buffer)))
-    ;; Upstream has unnecessary checks on variable `dired-du-mode' everywhere.
-    (setq-local dired-du-mode :dired-du-duc-pretending)
+      (lwarn 'dired-du-duc :debug "Falling back on du in %S" (current-buffer)))
+    ;; Upstream does many gratuitous checks on variable `dired-du-mode'
+    (setq-local dired-du-mode :dired-du-duc-pretending-to-be-dired-du)
+    ;; TODO: Maybe make one of these quieter, wrapping in `inhibit-message'
     (add-hook 'dired-before-readin-hook #'dired-du--drop-unexistent-files nil t)
-    (add-hook 'dired-after-readin-hook #'dired-du--replace 'append t)
+    (add-hook 'dired-after-readin-hook #'dired-du--replace 90 t)
     (dired-du--replace)
     (add-function :around (local 'revert-buffer-function) #'dired-du--revert))
 
    (t
     (kill-local-variable 'dired-du-used-space-program)
     (kill-local-variable 'dired-du-duc--lighter)
+    (when (eq dired-du-mode :dired-du-duc-pretending-to-be-dired-du)
+      (kill-local-variable 'dired-du-mode))
     (remove-hook 'dired-before-readin-hook #'dired-du--drop-unexistent-files t)
     (remove-hook 'dired-after-readin-hook #'dired-du--replace t)
     (remove-function (local 'revert-buffer-function) #'dired-du--revert)
@@ -182,20 +184,22 @@ See also `dired-du-on-find-dired-ok'.
 
 (defvar dired-du-duc--timer (timer-create))
 (defun dired-du-duc--start-timer ()
+  "Index `dired-du-duc-directories' and schedule doing it again."
   (cancel-timer dired-du-duc--timer)
   (setq dired-du-duc--timer
         (run-with-timer dired-du-duc-delay nil #'dired-du-duc--start-timer))
   (dired-du-duc-index dired-du-duc-directories))
 
 (defun dired-du-duc--turn-on-for-find-dired (fn &rest args)
-  "Apply Dired-Du advice on Find-Dired if `dired-du-duc-mode-predicate'."
+  "Maybe apply Dired-Du advice to Find-Dired.
+FN is presumably `find-dired-sentinel' and ARGS its args."
   (if (funcall dired-du-duc-mode-predicate)
       (apply #'dired-du--find-dired-around fn args)
     (apply fn args)))
 
 (defun dired-du-duc--turn-on ()
   "Maybe turn on `dired-du-duc-mode' in current buffer.
-Maybe run \"duc index\" too."
+Maybe run `dired-du-duc-index' on current directory."
   (when (derived-mode-p 'dired-mode)
     (when (funcall dired-du-duc-index-predicate)
       (dired-du-duc-index default-directory))
@@ -207,24 +211,25 @@ Maybe run \"duc index\" too."
   dired-du-duc-mode
   dired-du-duc--turn-on
   :require 'dired-du-duc
-  (cond (global-dired-du-duc-mode
-         (unless (executable-find "duc")
-           (display-warning 'dired-du-duc "No executable \"duc\" in PATH"))
-         (cl-loop for (_dir . buf) in dired-buffers
-                  do (with-current-buffer buf
-                       (when dired-du-mode
-                         ;; Clean up upstream `dired-du-mode' global effects
-                         (dired-du-mode 0))))
-         (add-hook 'dired-after-readin-hook #'dired-du-duc--turn-on)
-         (advice-add 'find-dired-sentinel :around #'dired-du-duc--turn-on-for-find-dired)
-         (advice-add 'ls-lisp-handle-switches :override #'dired-du-ls-lisp-handle-switches)
-         (dired-du-duc--start-timer))
+  (cond
+   (global-dired-du-duc-mode
+    (unless (executable-find "duc")
+      (display-warning 'dired-du-duc "No executable \"duc\" in PATH"))
+    (cl-loop for (_dir . buf) in dired-buffers
+             do (with-current-buffer buf
+                  (when dired-du-mode
+                    ;; Clean up `dired-du-mode' global effects
+                    (dired-du-mode 0))))
+    (advice-add 'find-dired-sentinel :around #'dired-du-duc--turn-on-for-find-dired)
+    (advice-add 'ls-lisp-handle-switches :override #'dired-du-ls-lisp-handle-switches)
+    (add-hook 'dired-after-readin-hook #'dired-du-duc--turn-on)
+    (dired-du-duc--start-timer))
 
-        (t
-         (remove-hook 'dired-after-readin-hook #'dired-du-duc--turn-on)
-         (advice-remove 'find-dired-sentinel #'dired-du-duc--turn-on-for-find-dired)
-         (advice-remove 'ls-lisp-handle-switches #'dired-du-ls-lisp-handle-switches)
-         (cancel-timer dired-du-duc--timer))))
+   (t
+    (advice-remove 'find-dired-sentinel #'dired-du-duc--turn-on-for-find-dired)
+    (advice-remove 'ls-lisp-handle-switches #'dired-du-ls-lisp-handle-switches)
+    (remove-hook 'dired-after-readin-hook #'dired-du-duc--turn-on)
+    (cancel-timer dired-du-duc--timer))))
 
 (provide 'dired-du-duc)
 
