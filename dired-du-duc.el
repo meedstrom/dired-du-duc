@@ -100,8 +100,14 @@ fewer directories than `dired-du-duc-before-index-functions' does.")
 (defvar dired-du-duc--process-dirs nil)
 (defun dired-du-duc-index (dirs)
   "Run \"duc index\" on DIRS."
-  (setq dirs (seq-filter #'file-readable-p
-                         (ensure-list (or dirs default-directory))))
+  (setq dirs
+        ;; Prevent infinite loop from `dired-du-duc-after-re-index-hook' to
+        ;; `dired-du-duc--try-turn-on' to `dired-du-duc-index' again.
+        (cl-loop with reserved = (seq-mapcat #'cdr dired-du-duc--process-dirs)
+                 for dir in dirs
+                 when (and (not (member dir reserved))
+                           (file-readable-p dir))
+                 collect dir))
   (when dirs
     (let ((proc (apply #'start-process
                        "duc" " *duc*"
@@ -117,13 +123,13 @@ which presumably includes the function `dired-revert'."
   (if (and (eq (process-status proc) 'exit)
            (eq (process-exit-status proc) 0))
       (let ((newly-indexed (alist-get proc dired-du-duc--process-dirs)))
-        (setq dired-du-duc--process-dirs
-              (assq-delete-all proc dired-du-duc--process-dirs))
         (cl-loop for (dir . buf) in dired-buffers
                  when (and (member dir newly-indexed)
                            (buffer-live-p buf))
                  do (with-current-buffer buf
-                      (run-hooks 'dired-du-duc-after-re-index-hook))))
+                      (run-hooks 'dired-du-duc-after-re-index-hook)))
+        (setq dired-du-duc--process-dirs
+              (assq-delete-all proc dired-du-duc--process-dirs)))
     (when (buffer-live-p (get-buffer " *duc*"))
       (display-buffer " *duc*"))
     (message "Unexpected sentinel invocation for process %S" proc)))
