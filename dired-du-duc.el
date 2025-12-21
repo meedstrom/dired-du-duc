@@ -92,8 +92,9 @@ To turn it on in all relevant buffers, configure
       (error "Not a Dired buffer"))
     (when (and (boundp 'ls-lisp-use-insert-directory-program)
                (null ls-lisp-use-insert-directory-program)
-               (not global-dired-du-duc-mode))
-      (display-warning 'dired-du-duc "No ls-lisp support without `global-dired-du-duc-mode'"))
+               (not (bound-and-true-p global-dired-du-duc-mode)))
+      (display-warning
+       'dired-du-duc "No ls-lisp support without `global-dired-du-duc-mode'"))
     (when dired-du-mode
       (dired-du-mode 0))
     (if (and (dired-du-duc-db-p)
