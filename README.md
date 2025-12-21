@@ -3,22 +3,36 @@
 Add indexing to [dired-du](https://elpa.gnu.org/packages/dired-du.html), via the Linux utility [duc](https://github.com/zevv/duc).
 
 Enable with `(global-dired-du-duc-mode)`.
-You'll also want to remove any call to `dired-du-mode` in your initfiles.
+
+You'll also want to **remove any call** to `dired-du-mode` in your initfiles.  While we rely on Dired-Du for the heavy lifting, the actual mode is confused about whether it is a global or local mode, so it had to be replaced.
 
 The global mode does three things:
 
-1. Start regularly indexing a configurable set of directories.
+1. Regularly run "duc index" on `dired-du-duc-directories` (default `("/home")`).
 
-2. Index every directory that the user actually visits in Dired.  This happens
-   asynchronously, and when that index is done, revert the buffer so it shows
-   correct sizes.
+2. Asynchronously run "duc index" each time a Dired buffer is opened or refreshed.  Option `dired-du-duc-index-predicate` can be configured if you don't want this.
 
-   (This is also repeated any time the user reverts the buffer for any reason.)
-   
-3. Manage turning `dired-du-mode` on or off in relevant buffers,
-   in case you prefer to fall back on nothing when the index isn't ready,
-   rather than fall back on the slow "du".
+3. Turn on `dired-du-duc-mode` in relevant buffers when duc is ready.  Option `dired-du-duc-mode-predicate` can be configured to enable it always, if you are fine with the slow "du" as a fallback.
 
-To configure this, type:
+## Buffer-local
 
-    M-x customize-group RET dired-du-duc RET
+You can turn on `dired-du-duc-mode` buffer-locally.
+
+In this case, it will never run "duc index" for you.  It's up to you to ensure that.
+
+Where there is no usable index, it falls back on "du".
+
+When falling back on "du", it is identical to upstream `dired-du-mode` except that it does not support ls-lisp.
+
+If you want to emulate the way that the global mode reverts the Dired buffer after duc is done indexing that directory, use the provided function `dired-du-duc-index`.
+
+## Find-Dired
+
+Support for Find-Dired requires the global mode to be enabled.  See also variable `dired-du-on-find-dired-ok`.
+
+## Bonus: Hooks
+
+One of these hooks may be useful for running `updatedb` and other things of that nature.
+
+- `dired-du-duc-before-index-functions`
+- `dired-du-duc-after-re-index-hook`
