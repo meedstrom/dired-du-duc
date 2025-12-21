@@ -55,32 +55,8 @@
   :link '(url-link "https://github.com/zevv/duc")
   :link '(url-link "https://duc.zevv.nl/"))
 
-(defcustom dired-du-duc-delay 3600
-  "Seconds between each indexing of `dired-du-duc-directories'."
-  :type 'number)
-
-(defcustom dired-du-duc-directories '("/home")
-  "Directories that `global-dired-du-duc-mode' should regularly index."
-  :type '(repeat directory))
-
-(defcustom dired-du-duc-index-predicate 'dired-du-duc-local-p
-  "Predicate for whether a directory should be indexed with duc."
-  :type '(radio (function-item dired-du-duc-local-p)
-                (function-item always)
-                (function-item ignore)
-                (function :tag "Custom predicate" :value (lambda ()))))
-
-(defcustom dired-du-duc-mode-predicate 'dired-du-duc-indexed-p
-  "Predicate for whether a Dired buffer should display recursive sizes.
-The sizes are taken from duc if possible, or calculated anew with du.
-Used by `global-dired-du-duc-mode'."
-  :type '(radio (function-item dired-du-duc-indexed-p)
-                (function-item always)
-                (function :tag "Custom predicate" :value (lambda ()))))
-
-(defun dired-du-duc-local-p ()
-  "Non-nil if current directory is on a local filesystem."
-  (not (file-remote-p default-directory)))
+
+;;;; Local mode
 
 (defun dired-du-duc-indexed-p ()
   "Non-nil if current directory has been indexed."
@@ -92,54 +68,10 @@ Creates duc.db if it didn't exist."
   (and (executable-find "duc")
        (eq 0 (call-process "duc" nil nil nil "index" (null-device)))))
 
-(defvar dired-du-duc-before-index-functions nil
-  "Hook run with one argument, the list of directories to index.
-Called by `dired-du-duc-index' just after starting an async job.")
+(defvar-local dired-du-duc-using-duc nil
+  "Whether current buffer is using duc in place of du.")
 
-(defvar dired-du-duc-after-re-index-hook '(revert-buffer)
-  "Hook run in a Dired buffer after duc finished indexing the directory.
-As there may not be buffers for every directory indexed, this hook sees
-fewer directories than `dired-du-duc-before-index-functions' does.")
-
-(defvar dired-du-duc--process-dirs nil)
-(defun dired-du-duc-index (dirs)
-  "Run \"duc index\" on DIRS."
-  (setq dirs
-        ;; Prevent infinite loop from `dired-du-duc-after-re-index-hook' to
-        ;; `dired-du-duc--try-turn-on' back to `dired-du-duc-index'.
-        (cl-loop with reserved = (seq-mapcat #'cdr dired-du-duc--process-dirs)
-                 for dir in dirs
-                 when (and (not (member dir reserved))
-                           (file-readable-p dir))
-                 collect dir))
-  (when dirs
-    (let ((proc (apply #'start-process
-                       "duc" " *duc*"
-                       "duc" "index" "-v" dirs)))
-      (push (cons proc dirs) dired-du-duc--process-dirs)
-      (set-process-sentinel proc #'dired-du-duc--handle-done))
-    (run-hook-with-args 'dired-du-duc-before-index-functions dirs)))
-
-(defun dired-du-duc--handle-done (proc _event)
-  "If PROC done, revert any buffers that show the newly indexed dirs.
-Actually, run `dired-du-duc-after-re-index-hook' in those buffers,
-which presumably includes the function `revert-buffer'."
-  (if (and (eq (process-status proc) 'exit)
-           (eq (process-exit-status proc) 0))
-      (let ((newly-indexed (alist-get proc dired-du-duc--process-dirs)))
-        (cl-loop for (dir . buf) in dired-buffers
-                 when (and (member dir newly-indexed)
-                           (buffer-live-p buf))
-                 do (with-current-buffer buf
-                      (when (derived-mode-p 'dired-mode)
-                        (run-hooks 'dired-du-duc-after-re-index-hook))))
-        (setq dired-du-duc--process-dirs
-              (assq-delete-all proc dired-du-duc--process-dirs)))
-    (when (buffer-live-p (get-buffer " *duc*"))
-      (display-buffer " *duc*"))
-    (error "Unexpected sentinel invocation for process %S" proc)))
-
-(defvar-local dired-du-duc-using-duc nil)
+;;;###autoload
 (define-minor-mode dired-du-duc-mode
   "Show real directory sizes in Dired, using du or duc.
 
@@ -189,6 +121,86 @@ To turn it on in all relevant buffers, configure
     (remove-function (local 'revert-buffer-function) #'dired-du--revert)
     (when (derived-mode-p 'dired-mode)
       (revert-buffer)))))
+
+
+;;;; Function `dired-du-duc-index'
+
+(defvar dired-du-duc-before-index-functions nil
+  "Hook run with one argument, the list of directories to index.
+Called by `dired-du-duc-index' just after starting an async job.")
+
+(defvar dired-du-duc-after-re-index-hook '(revert-buffer)
+  "Hook run in a Dired buffer after duc finished indexing the directory.
+As there may not be buffers for every directory indexed, this hook sees
+fewer directories than `dired-du-duc-before-index-functions' does.")
+
+(defvar dired-du-duc--process-dirs nil)
+(defun dired-du-duc-index (dirs)
+  "Run \"duc index\" on DIRS."
+  (setq dirs
+        ;; Prevent infinite loop from `dired-du-duc-after-re-index-hook' to
+        ;; `dired-du-duc--try-turn-on' back to `dired-du-duc-index'.
+        (cl-loop with reserved = (seq-mapcat #'cdr dired-du-duc--process-dirs)
+                 for dir in dirs
+                 when (and (not (member dir reserved))
+                           (file-readable-p dir))
+                 collect dir))
+  (when dirs
+    (let ((proc (apply #'start-process
+                       "duc" " *duc*"
+                       "duc" "index" "-v" dirs)))
+      (push (cons proc dirs) dired-du-duc--process-dirs)
+      (set-process-sentinel proc #'dired-du-duc--handle-done))
+    (run-hook-with-args 'dired-du-duc-before-index-functions dirs)))
+
+(defun dired-du-duc--handle-done (proc _event)
+  "If PROC done, revert any buffers that show the newly indexed dirs.
+Actually, run `dired-du-duc-after-re-index-hook' in those buffers,
+which presumably includes the function `revert-buffer'."
+  (if (and (eq (process-status proc) 'exit)
+           (eq (process-exit-status proc) 0))
+      (let ((newly-indexed (alist-get proc dired-du-duc--process-dirs)))
+        (cl-loop for (dir . buf) in dired-buffers
+                 when (and (member dir newly-indexed)
+                           (buffer-live-p buf))
+                 do (with-current-buffer buf
+                      (when (derived-mode-p 'dired-mode)
+                        (run-hooks 'dired-du-duc-after-re-index-hook))))
+        (setq dired-du-duc--process-dirs
+              (assq-delete-all proc dired-du-duc--process-dirs)))
+    (when (buffer-live-p (get-buffer " *duc*"))
+      (display-buffer " *duc*"))
+    (error "Unexpected sentinel invocation for process %S" proc)))
+
+
+;;;; Global mode
+
+(defcustom dired-du-duc-delay 3600
+  "Seconds between each indexing of `dired-du-duc-directories'."
+  :type 'number)
+
+(defcustom dired-du-duc-directories '("/home")
+  "Directories that `global-dired-du-duc-mode' should regularly index."
+  :type '(repeat directory))
+
+(defcustom dired-du-duc-index-predicate 'dired-du-duc-local-p
+  "Predicate for whether a directory should be indexed with duc."
+  :type '(radio (function-item dired-du-duc-local-p)
+                (function-item always)
+                (function-item ignore)
+                (function :tag "Custom predicate" :value (lambda ()))))
+
+(defcustom dired-du-duc-mode-predicate 'dired-du-duc-indexed-p
+  "Predicate for whether a Dired buffer should display recursive sizes.
+The sizes are taken from duc if possible, or calculated anew with du.
+Used by `global-dired-du-duc-mode'."
+  :type '(radio (function-item dired-du-duc-indexed-p)
+                (function-item always)
+                (function :tag "Custom predicate" :value (lambda ()))))
+
+(defun dired-du-duc-local-p ()
+  "Non-nil if current directory is on a local filesystem."
+  (not (file-remote-p default-directory)))
 
 (defvar dired-du-duc--timer (timer-create))
 (defun dired-du-duc--start-timer ()
