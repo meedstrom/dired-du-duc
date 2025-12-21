@@ -1,6 +1,6 @@
 # dired-du-duc
 
-Add indexing to [dired-du](https://elpa.gnu.org/packages/dired-du.html), via the Linux utility [duc](https://github.com/zevv/duc).
+Make [dired-du](https://elpa.gnu.org/packages/dired-du.html) faster, via the Linux utility [duc](https://github.com/zevv/duc).
 
 Enable with `(global-dired-du-duc-mode)`.
 
