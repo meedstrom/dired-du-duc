@@ -115,12 +115,10 @@ To turn it on in all relevant buffers, configure
     (add-hook 'dired-before-readin-hook #'dired-du--drop-unexistent-files nil t)
     (add-hook 'dired-after-readin-hook #'dired-du--replace 90 t)
     (add-function :around (local 'revert-buffer-function) #'dired-du--revert)
-    (advice-add 'dired-du--replace :around
-                #'dired-du-duc--override-used-space-program)
+    (advice-add 'dired-du--replace :around #'dired-du-duc--override-used-space-program)
     (dired-du--replace))
 
    (t
-    (kill-local-variable 'dired-du-used-space-program)
     (kill-local-variable 'dired-du-duc-using-duc)
     (when (eq dired-du-mode :dired-du-duc-pretending-to-be-dired-du)
       (kill-local-variable 'dired-du-mode))
@@ -274,7 +272,9 @@ Maybe run `dired-du-duc-index' on current directory."
     (when dired-du-duc--overridden-lighter
       (let ((cell (assq 'dired-du-mode minor-mode-alist)))
         (when cell (setcdr cell dired-du-duc--overridden-lighter)))
-      (setq dired-du-duc--overridden-lighter nil)))))
+      (setq dired-du-duc--overridden-lighter nil))
+    ;; Bonus but pointless cleanup
+    (advice-remove 'dired-du--replace #'dired-du-duc--override-used-space-program))))
 
 (provide 'dired-du-duc)
 
