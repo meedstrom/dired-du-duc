@@ -146,7 +146,9 @@ fewer directories than `dired-du-duc-before-index-functions' does.")
 
 (defvar dired-du-duc--process-dirs nil)
 (defun dired-du-duc-index (dirs)
-  "Run \"duc index\" on DIRS."
+  "Run \"duc index\" on DIRS.
+Also run `dired-du-duc-before-index-functions',
+and arrange to run `dired-du-duc-after-re-index-hook' afterwards."
   (setq dirs
         ;; Prevent infinite loop from `dired-du-duc-after-re-index-hook' to
         ;; `dired-du-duc--try-turn-on' back to `dired-du-duc-index'.
@@ -184,6 +186,8 @@ which presumably includes the function `revert-buffer'."
 
 
 ;;;; A silly perf optimization
+;; Only matters when you have a stupidly long list of Dired buffers,
+;; and do something to revert them all, or toggle the global mode.
 
 (defcustom dired-du-duc-file-handlers nil
   "(A performance knob) List of file name handlers to allow.

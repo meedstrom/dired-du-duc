@@ -36,3 +36,7 @@ One of these hooks may be useful for running `updatedb` and other things of that
 
 - `dired-du-duc-before-index-functions`
 - `dired-du-duc-after-re-index-hook`
+
+## Privacy note
+
+If file names are sensitive data for you, note that the index at `~/.cache/duc/duc.db` contains all file names ever indexed.
