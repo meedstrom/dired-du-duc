@@ -76,12 +76,16 @@ Creates duc.db if it didn't exist."
 (defvar-local dired-du-duc-using-duc nil
   "Whether current buffer is using duc in place of du.")
 
-(defun dired-du-duc--override-used-space-program (fn &rest args)
-  "Apply FN to ARGS while overriding `dired-du-used-space-program'."
+(defvar dired-du-duc--still-replacing nil)
+(defun dired-du-duc--wrap-replace (fn &rest args)
+  "Apply FN to ARGS while overriding `dired-du-used-space-program'.
+Also ensure `dired-du-duc--handle-done' does not run too early."
   (let ((dired-du-used-space-program (if dired-du-duc-using-duc
                                          '("duc" "ls -bD")
                                        dired-du-used-space-program)))
-    (apply fn args)))
+    (setq dired-du-duc--still-replacing t)
+    (unwind-protect (apply fn args)
+      (setq dired-du-duc--still-replacing nil))))
 
 ;;;###autoload
 (define-minor-mode dired-du-duc-mode
@@ -120,7 +124,7 @@ To turn it on in all relevant buffers, configure
     (add-hook 'dired-before-readin-hook #'dired-du--drop-unexistent-files nil t)
     (add-hook 'dired-after-readin-hook #'dired-du--replace 90 t)
     (add-function :around (local 'revert-buffer-function) #'dired-du--revert)
-    (advice-add 'dired-du--replace :around #'dired-du-duc--override-used-space-program)
+    (advice-add 'dired-du--replace :around #'dired-du-duc--wrap-replace)
     (dired-du--replace))
 
    (t
@@ -172,15 +176,21 @@ Actually, run `dired-du-duc-after-re-index-hook' in those buffers,
 which presumably includes the function `revert-buffer'."
   (if (and (eq (process-status proc) 'exit)
            (eq (process-exit-status proc) 0))
-      (let ((newly-indexed (alist-get proc dired-du-duc--process-dirs)))
-        (cl-loop for (dir . buf) in dired-buffers
-                 when (and (member dir newly-indexed)
-                           (buffer-live-p buf))
-                 do (with-current-buffer buf
-                      (when (derived-mode-p 'dired-mode)
-                        (run-hooks 'dired-du-duc-after-re-index-hook))))
-        (setq dired-du-duc--process-dirs
-              (assq-delete-all proc dired-du-duc--process-dirs)))
+      (if dired-du-duc--still-replacing
+          ;; See `dired-du-get-recursive-dir-size-in-parallel': it runs
+          ;; `sleep-for', which allows this sentinel to run too early.
+          (run-with-timer 0 nil 'dired-du-duc--handle-done proc nil)
+        (let ((newly-indexed (alist-get proc dired-du-duc--process-dirs)))
+          (cl-loop for (dir . buf) in dired-buffers
+                   when (and (member dir newly-indexed)
+                             (buffer-live-p buf))
+                   do (with-current-buffer buf
+                        (when (derived-mode-p 'dired-mode)
+                          (if (dired-du-duc-indexed-p)
+                              (run-hooks 'dired-du-duc-after-re-index-hook)
+                            (message "dired-du-duc: Could not ls here: %s" dir)))))
+          (setq dired-du-duc--process-dirs
+                (assq-delete-all proc dired-du-duc--process-dirs))))
     (when (buffer-live-p (get-buffer " *duc*"))
       (display-buffer " *duc*"))
     (error "Unexpected sentinel invocation for process %S" proc)))
@@ -283,7 +293,8 @@ Maybe run `dired-du-duc-index' on current directory."
         (dired-du-duc-index dir)
         (unless (member dir dired-du-duc--directories)
           (push dir dired-du-duc--directories)))
-      (when (funcall dired-du-duc-mode-predicate)
+      (when (and (not dired-du-duc-mode)
+                 (funcall dired-du-duc-mode-predicate))
         (dired-du-duc-mode)))))
 
 (defvar dired-du-duc--overridden-lighter nil
@@ -328,7 +339,7 @@ Maybe run `dired-du-duc-index' on current directory."
         (when cell (setcdr cell dired-du-duc--overridden-lighter)))
       (setq dired-du-duc--overridden-lighter nil))
     ;; Bonus but pointless cleanup
-    (advice-remove 'dired-du--replace #'dired-du-duc--override-used-space-program))))
+    (advice-remove 'dired-du--replace #'dired-du-duc--wrap-replace))))
 
 (provide 'dired-du-duc)
 
