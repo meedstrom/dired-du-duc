@@ -140,7 +140,7 @@ To turn it on in all relevant buffers, configure
       (revert-buffer)))))
 
 
-;;;; Function `dired-du-duc-index'
+;;;; Mode predicate
 
 (defcustom dired-du-duc-mode-predicate 'dired-du-duc-indexed-p
   "Predicate for whether a Dired buffer should display recursive sizes.
@@ -156,6 +156,9 @@ The sizes are taken from duc if possible, or calculated anew with du.X"
       (let ((file-name-handler-alist (dired-du-duc--handler-alist)))
         (when (funcall dired-du-duc-mode-predicate)
           (dired-du-duc-mode))))))
+
+
+;;;; Function `dired-du-duc-index'
 
 (defvar dired-du-duc-before-index-functions nil
   "Hook run with one argument, the list of directories to index.
@@ -272,19 +275,33 @@ KEY must be a symbol, unquoted."
 
 (defcustom dired-du-duc-index-predicate 'dired-du-duc-local-p
   "Predicate for whether a directory should be indexed with duc.
+Used by `global-dired-du-duc-mode'.
+
 If this is not set to `dired-du-duc-local-p', you may need to
-configure `dired-du-duc-file-handlers'.
-Used by `global-dired-du-duc-mode'."
+configure `dired-du-duc-file-handlers'."
   :type '(radio (function-item dired-du-duc-local-p)
                 (function-item always)
                 (function-item ignore)
                 (function :tag "Custom predicate" :value (lambda ()))))
 
+(defvar dired-du-duc--seen-directories nil
+  "List of directories that passed `dired-du-duc-index-predicate'.")
+
+(defun dired-du-duc--try-index ()
+  "Maybe run `dired-du-duc-index' on current directory."
+  (unless dired-du-duc--inhibit-index
+    (when (derived-mode-p 'dired-mode)
+      (let ((file-name-handler-alist (dired-du-duc--handler-alist)))
+        (when (funcall dired-du-duc-index-predicate)
+          (let ((dir (expand-file-name default-directory)))
+            (dired-du-duc-index dir)
+            (unless (member dir dired-du-duc--seen-directories)
+              (push dir dired-du-duc--seen-directories))))))))
+
 (defun dired-du-duc-local-p ()
   "Non-nil if current directory is on a local filesystem."
   (not (file-remote-p default-directory)))
 
-(defvar dired-du-duc--seen-directories nil)
 (defvar dired-du-duc--timer (timer-create))
 (defun dired-du-duc--start-timer ()
   "Index `dired-du-duc--seen-directories' and schedule doing it again."
@@ -303,17 +320,6 @@ FN is presumably `find-dired-sentinel' and ARGS its args."
   (if (funcall dired-du-duc-mode-predicate)
       (apply #'dired-du--find-dired-around fn args)
     (apply fn args)))
-
-(defun dired-du-duc--try-index ()
-  "Maybe run `dired-du-duc-index' on current directory."
-  (unless dired-du-duc--inhibit-index
-    (when (derived-mode-p 'dired-mode)
-      (let ((file-name-handler-alist (dired-du-duc--handler-alist)))
-        (when (funcall dired-du-duc-index-predicate)
-          (let ((dir (expand-file-name default-directory)))
-            (dired-du-duc-index dir)
-            (unless (member dir dired-du-duc--seen-directories)
-              (push dir dired-du-duc--seen-directories))))))))
 
 (defvar dired-du-duc--overridden-lighter nil
   "Dired-du lighter before enabling `global-dired-du-duc-mode'.")
