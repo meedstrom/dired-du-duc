@@ -63,8 +63,9 @@
 
 (defun dired-du-duc-indexed-p ()
   "Non-nil if current directory has been indexed."
-  (eq 0 (call-process "duc" nil nil nil "ls"
-                      (expand-file-name default-directory))))
+  ;; NOTE: Do not pass `default-directory'; duc ls resolves symlinks only if
+  ;; passed "." or no argument.
+  (eq 0 (call-process "duc" nil nil nil "ls")))
 
 (defun dired-du-duc-db-p ()
   "Non-nil if duc is in PATH and ~/.cache/duc/duc.db is writable.
