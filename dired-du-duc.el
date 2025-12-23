@@ -60,7 +60,8 @@
 
 (defun dired-du-duc-indexed-p ()
   "Non-nil if current directory has been indexed."
-  (eq 0 (call-process "duc" nil nil nil "ls")))
+  (eq 0 (call-process "duc" nil nil nil "ls"
+                      (expand-file-name default-directory))))
 
 (defun dired-du-duc-db-p ()
   "Non-nil if duc is in PATH and ~/.cache/duc/duc.db is writable.
@@ -147,7 +148,7 @@ fewer directories than `dired-du-duc-before-index-functions' does.")
         ;; Prevent infinite loop from `dired-du-duc-after-re-index-hook' to
         ;; `dired-du-duc--try-turn-on' back to `dired-du-duc-index'.
         (cl-loop with reserved = (seq-mapcat #'cdr dired-du-duc--process-dirs)
-                 for dir in dirs
+                 for dir in (mapcar #'expand-file-name (ensure-list dirs))
                  when (and (not (member dir reserved))
                            (file-readable-p dir))
                  collect dir))
