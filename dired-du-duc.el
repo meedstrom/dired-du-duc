@@ -71,6 +71,13 @@ Creates duc.db if it didn't exist."
 (defvar-local dired-du-duc-using-duc nil
   "Whether current buffer is using duc in place of du.")
 
+(defun dired-du-duc--override-used-space-program (fn &rest args)
+  "Apply FN to ARGS while overriding `dired-du-used-space-program'."
+  (let ((dired-du-used-space-program (if dired-du-duc-using-duc
+                                         '("duc" "ls -bD")
+                                       dired-du-used-space-program)))
+    (apply fn args)))
+
 ;;;###autoload
 (define-minor-mode dired-du-duc-mode
   "Show real directory sizes in Dired, using du or duc.
@@ -99,9 +106,7 @@ To turn it on in all relevant buffers, configure
       (dired-du-mode 0))
     (if (and (dired-du-duc-db-p)
              (dired-du-duc-indexed-p))
-        (setq-local dired-du-used-space-program '("duc" "ls -bD")
-                    dired-du-duc-using-duc t)
-      (kill-local-variable 'dired-du-used-space-program)
+        (setq-local dired-du-duc-using-duc t)
       (kill-local-variable 'dired-du-duc-using-duc)
       (lwarn 'dired-du-duc :debug "Falling back on du in %S" (current-buffer)))
     ;; Upstream does many gratuitous checks on variable `dired-du-mode'.
@@ -110,6 +115,8 @@ To turn it on in all relevant buffers, configure
     (add-hook 'dired-before-readin-hook #'dired-du--drop-unexistent-files nil t)
     (add-hook 'dired-after-readin-hook #'dired-du--replace 90 t)
     (add-function :around (local 'revert-buffer-function) #'dired-du--revert)
+    (advice-add 'dired-du--replace :around
+                #'dired-du-duc--override-used-space-program)
     (dired-du--replace))
 
    (t
