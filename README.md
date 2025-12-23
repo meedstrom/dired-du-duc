@@ -8,11 +8,11 @@ You'll also want to **remove any call** to `dired-du-mode` in your initfiles.  W
 
 The global mode does three things:
 
-1. Regularly run "duc index" on `dired-du-duc-directories` (default `("/home")`).
+1. Asynchronously run "duc index" each time a Dired buffer is opened or refreshed.  Option `dired-du-duc-index-predicate` can be configured if you don't want this.
 
-2. Asynchronously run "duc index" each time a Dired buffer is opened or refreshed.  Option `dired-du-duc-index-predicate` can be configured if you don't want this.
+2. Turn on `dired-du-duc-mode` in relevant buffers when duc is ready.  Option `dired-du-duc-mode-predicate` can be configured to enable it always, if you are fine with the slow "du" as a fallback.
 
-3. Turn on `dired-du-duc-mode` in relevant buffers when duc is ready.  Option `dired-du-duc-mode-predicate` can be configured to enable it always, if you are fine with the slow "du" as a fallback.
+3. Regularly re-index the directories we have previously indexed.  Option `dired-du-duc-delay` controls how often to do this.
 
 ## Buffer-local
 

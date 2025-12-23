@@ -35,13 +35,16 @@
 
 ;; The global mode does three things:
 
-;; 1. Regularly run "duc index" on `dired-du-duc-directories'.
+;; 1. Asynchronously run "duc index" each time a Dired buffer is opened.
+;;    Option `dired-du-duc-index-predicate' controls this; the default is to
+;;    avoid doing this for remote network directories.
 
-;; 2. Asynchronously run "duc index" each time a Dired buffer is opened.
-
-;; 3. Turn `dired-du-duc-mode' on in relevant buffers when duc is ready.
+;; 2. Turn `dired-du-duc-mode' on in relevant buffers when duc is ready.
 ;;    Option `dired-du-duc-mode-predicate' can be configured to enable it
-;;    always if you are fine with the slow "du" as a fallback.
+;;    always, if you are fine with the slow "du" as a fallback.
+
+;; 3. Regularly re-index the directories we have previously indexed.
+;;    Option `dired-du-duc-delay' controls how often to do this.
 
 ;;; Code:
 
@@ -183,12 +186,8 @@ which presumably includes the function `revert-buffer'."
 ;;;; Global mode
 
 (defcustom dired-du-duc-delay 3600
-  "Seconds between each indexing of `dired-du-duc-directories'."
+  "Seconds between each indexing of `dired-du-duc--directories'."
   :type 'number)
-
-(defcustom dired-du-duc-directories '("/home")
-  "Directories that `global-dired-du-duc-mode' should regularly index."
-  :type '(repeat directory))
 
 (defcustom dired-du-duc-index-predicate 'dired-du-duc-local-p
   "Predicate for whether a directory should be indexed with duc."
@@ -209,13 +208,14 @@ Used by `global-dired-du-duc-mode'."
   "Non-nil if current directory is on a local filesystem."
   (not (file-remote-p default-directory)))
 
+(defvar dired-du-duc--directories nil)
 (defvar dired-du-duc--timer (timer-create))
 (defun dired-du-duc--start-timer ()
-  "Index `dired-du-duc-directories' and schedule doing it again."
+  "Index `dired-du-duc--directories' and schedule doing it again."
   (cancel-timer dired-du-duc--timer)
   (setq dired-du-duc--timer
         (run-with-timer dired-du-duc-delay nil #'dired-du-duc--start-timer))
-  (dired-du-duc-index dired-du-duc-directories))
+  (dired-du-duc-index dired-du-duc--directories))
 
 (defun dired-du-duc--turn-on-for-find-dired (fn &rest args)
   "Maybe apply Dired-Du advice to Find-Dired.
@@ -228,10 +228,13 @@ FN is presumably `find-dired-sentinel' and ARGS its args."
   "Maybe turn on `dired-du-duc-mode' in current buffer.
 Maybe run `dired-du-duc-index' on current directory."
   (when (derived-mode-p 'dired-mode)
-    (when (funcall dired-du-duc-index-predicate)
-      (dired-du-duc-index default-directory))
-    (when (funcall dired-du-duc-mode-predicate)
-      (dired-du-duc-mode))))
+    (let ((dir (expand-file-name default-directory)))
+      (when (funcall dired-du-duc-index-predicate)
+        (dired-du-duc-index dir)
+        (unless (member dir dired-du-duc--directories)
+          (push dir dired-du-duc--directories)))
+      (when (funcall dired-du-duc-mode-predicate)
+        (dired-du-duc-mode)))))
 
 (defvar dired-du-duc--overridden-lighter nil
   "Dired-du lighter before enabling `global-dired-du-duc-mode'.")
