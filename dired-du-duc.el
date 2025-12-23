@@ -213,9 +213,11 @@ Used by `global-dired-du-duc-mode'."
 (defun dired-du-duc--start-timer ()
   "Index `dired-du-duc--directories' and schedule doing it again."
   (cancel-timer dired-du-duc--timer)
-  (setq dired-du-duc--timer
-        (run-with-timer dired-du-duc-delay nil #'dired-du-duc--start-timer))
-  (dired-du-duc-index dired-du-duc--directories))
+  (when (and (numberp dired-du-duc-delay)
+             (> dired-du-duc-delay 0))
+    (setq dired-du-duc--timer
+          (run-with-timer dired-du-duc-delay nil #'dired-du-duc--start-timer))
+    (dired-du-duc-index dired-du-duc--directories)))
 
 (defun dired-du-duc--turn-on-for-find-dired (fn &rest args)
   "Maybe apply Dired-Du advice to Find-Dired.
