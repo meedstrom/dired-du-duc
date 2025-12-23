@@ -183,6 +183,45 @@ which presumably includes the function `revert-buffer'."
     (error "Unexpected sentinel invocation for process %S" proc)))
 
 
+;;;; A silly perf optimization
+
+(defcustom dired-du-duc-file-handlers nil
+  "(A performance knob) List of file name handlers to allow.
+
+If t, allow everything in `file-name-handler-alist'.
+If nil, allow none of them.
+Otherwise, should be a list of symbols like the cdrs of that variable."
+  :type '(choice (const :tag "All" t)
+                 (repeat function)))
+
+(defvar dired-du-duc--memo-table (make-hash-table :test #'eq))
+(defvar dired-du-duc--memo-timer (timer-create))
+(define-inline dired-du-duc--memoize (key &rest body)
+  "Eval BODY like `progn' and store non-nil result at KEY in a table.
+Repeated calls return the stored value instead of evaluating BODY again.
+
+The stored value is cleared as soon as the current call stack finishes,
+or when the likes of `sit-for' give Emacs a chance to run pending timers."
+  (declare (indent defun))
+  (inline-quote
+   (or (gethash ,key dired-du-duc--memo-table)
+       (prog1 (puthash ,key ,(cons 'progn body) dired-du-duc--memo-table)
+         (unless (memq dired-du-duc--memo-timer timer-list)
+           (setq dired-du-duc--memo-timer
+                 (run-with-timer 0 nil #'clrhash dired-du-duc--memo-table))))
+       (error "dired-du-duc--memoize: Tried to memoize nil at key %s" ,key))))
+
+(defun dired-du-duc--handler-alist ()
+  "Calculate an appropriate value for `file-name-handler-alist'."
+  (and dired-du-duc-file-handlers
+       (dired-du-duc--memoize 'dired-du-duc--handler-alist
+         (if (eq t dired-du-duc-file-handlers)
+             file-name-handler-alist
+           (cl-loop for (regexp . handler) in file-name-handler-alist
+                    when (member handler dired-du-duc-file-handlers)
+                    collect (cons regexp handler))))))
+
+
 ;;;; Global mode
 
 (defcustom dired-du-duc-delay 3600
@@ -190,7 +229,10 @@ which presumably includes the function `revert-buffer'."
   :type 'number)
 
 (defcustom dired-du-duc-index-predicate 'dired-du-duc-local-p
-  "Predicate for whether a directory should be indexed with duc."
+  "Predicate for whether a directory should be indexed with duc.
+If changing this from `dired-du-duc-local-p', you may also need to
+configure `dired-du-duc-file-handlers'.
+Used by `global-dired-du-duc-mode'."
   :type '(radio (function-item dired-du-duc-local-p)
                 (function-item always)
                 (function-item ignore)
@@ -230,7 +272,8 @@ FN is presumably `find-dired-sentinel' and ARGS its args."
   "Maybe turn on `dired-du-duc-mode' in current buffer.
 Maybe run `dired-du-duc-index' on current directory."
   (when (derived-mode-p 'dired-mode)
-    (let ((dir (expand-file-name default-directory)))
+    (let ((file-name-handler-alist (dired-du-duc--handler-alist))
+          (dir (expand-file-name default-directory)))
       (when (funcall dired-du-duc-index-predicate)
         (dired-du-duc-index dir)
         (unless (member dir dired-du-duc--directories)
